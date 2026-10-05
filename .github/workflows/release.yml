@@ -1,0 +1,157 @@
+# Opens the release PR, the way the Maven Release Plugin prepares a release:
+#
+#   Release vX.Y.Z                      POM X.Y.Z, tagged once merged
+#   Prepare next development version   POM X.Y.(Z+1)-SNAPSHOT
+#
+# Both commits go on branch bot/release-vX.Y.Z, on top of main. Merging the PR
+# (merge commit or rebase, not squash) starts publish-release.yml.
+#
+# Started by hand. After that, every push to main rebuilds the open release
+# PR on top of the new main, so the release always contains every PR merged
+# before it, just like the draft's notes. Open PRs are never part of it.
+# See docs/releasing.md.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version, e.g. 1.2.3 or 1.2.3-rc.1. Leave empty to use the draft release's version."
+        required: false
+        type: string
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  # A newer push replaces a waiting refresh; a manual run never waits behind one.
+  group: release-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Check version
+    runs-on: ubuntu-latest
+    permissions:
+      # Draft releases are only listed for tokens with write access.
+      contents: write
+      pull-requests: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      next: ${{ steps.version.outputs.next }}
+    steps:
+      - id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            # Refresh the open release PR, if there is one.
+            branch=$(gh pr list --repo "$REPO" --base main --state open --json headRefName \
+              --jq '[.[].headRefName | select(startswith("bot/release-v"))][0] // ""')
+            if [[ -z "$branch" ]]; then
+              echo "No open release PR to refresh."
+              exit 0
+            fi
+            VERSION=${branch#bot/release-v}
+          else
+            # To release from maintenance branches later, also accept release/*.
+            if [[ "$GITHUB_REF" != refs/heads/main ]]; then
+              echo "::error::Run this workflow on main."
+              exit 1
+            fi
+            if [[ -z "$VERSION" ]]; then
+              VERSION=$(gh api "repos/$REPO/releases" --jq '[.[] | select(.draft)][0].tag_name // ""')
+              if [[ -z "$VERSION" ]]; then
+                echo "::error::There is no draft release. Enter the version to release."
+                exit 1
+              fi
+            fi
+          fi
+          VERSION=${VERSION#v}
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::$VERSION is not a version like 1.2.3 or 1.2.3-rc.1."
+            exit 1
+          fi
+          if gh api "repos/$REPO/git/ref/tags/v$VERSION" --silent 2>/dev/null; then
+            echo "::error::Tag v$VERSION already exists."
+            exit 1
+          fi
+          # After 1.2.3 comes 1.2.4-SNAPSHOT; after 1.2.3-rc.1 comes 1.2.3-SNAPSHOT.
+          # The version actually released next is decided by the PR labels.
+          if [[ "$VERSION" == *-* ]]; then
+            NEXT="${VERSION%%-*}-SNAPSHOT"
+          else
+            IFS=. read -r major minor patch <<< "$VERSION"
+            NEXT="$major.$minor.$((patch + 1))-SNAPSHOT"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+
+  prepare:
+    name: Open release PR v${{ needs.version.outputs.version }}
+    needs: version
+    if: needs.version.outputs.version != ''
+    runs-on: ubuntu-latest
+    permissions: {}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      NEXT: ${{ needs.version.outputs.next }}
+      BRANCH: bot/release-v${{ needs.version.outputs.version }}
+    steps:
+      # PRs opened with the default token don't start CI or the label check.
+      - id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.BOT_CLIENT_ID }}
+          private-key: ${{ secrets.BOT_PRIVATE_KEY }}
+      # The tip of main, not the commit the run started on, so the PR always
+      # sits on the newest main.
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          token: ${{ steps.app-token.outputs.token }}
+      - name: Commit as the App
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          id=$(gh api "/users/${SLUG}[bot]" --jq .id)
+          git config user.name "${SLUG}[bot]"
+          git config user.email "${id}+${SLUG}[bot]@users.noreply.github.com"
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Release commit and next development version
+        run: |
+          mvn -B -ntp versions:set -DnewVersion="$VERSION" -DgenerateBackupPoms=false
+          git commit -am "Release v$VERSION"
+          mvn -B -ntp versions:set -DnewVersion="$NEXT" -DgenerateBackupPoms=false
+          git commit -am "Prepare next development version $NEXT"
+      - name: Open or update the release PR
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          # Rebuilt from main every time, so the old commits are replaced.
+          git push --force origin "HEAD:refs/heads/$BRANCH"
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            # A release PR for another version is outdated now.
+            gh pr list --base main --state open --json number,headRefName \
+              --jq ".[] | select((.headRefName | startswith(\"bot/release-v\")) and .headRefName != \"$BRANCH\") | .number" \
+              | while read -r number; do
+                  gh pr close "$number" --delete-branch --comment "Replaced by the release PR for v$VERSION."
+                done
+          fi
+          url=$(gh pr list --head "$BRANCH" --state open --json url --jq '.[0].url // ""')
+          if [[ -z "$url" ]]; then
+            url=$(gh pr create --base main --head "$BRANCH" --label skip-changelog \
+              --title "[Release] v$VERSION" \
+              --body "Sets the version to \`$VERSION\` and then to \`$NEXT\`. Every merge to \`main\` rebuilds this PR on top of it, so the release contains everything merged before it; open PRs are not part of it.
+
+          Merge with **Create a merge commit** or **Rebase and merge**, not squash: the commit \`Release v$VERSION\` must end up on \`main\`, where it gets tagged. Merging publishes the release; see docs/releasing.md.")
+          fi
+          echo "Release PR: $url" >> "$GITHUB_STEP_SUMMARY"

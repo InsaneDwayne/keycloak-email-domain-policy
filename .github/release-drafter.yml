@@ -1,0 +1,75 @@
+# Release Drafter keeps one draft release up to date from merged pull requests.
+# Each PR needs one of the labels below (checked by pr-labels.yml); the labels
+# decide the release notes section and the next version. See docs/releasing.md.
+
+name-template: "v$RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+
+categories:
+  - type: pre-exclude
+    when:
+      label: skip-changelog
+  - title: ⚠️ Breaking changes
+    semver-increment: major
+    exclusive: true
+    when:
+      label: breaking
+  - title: ➕ Features
+    semver-increment: minor
+    exclusive: true
+    when:
+      label: feature
+  - title: 🩹 Fixes
+    exclusive: true
+    when:
+      label: fix
+  - title: ⬆️ Dependencies
+    collapse-after: 3
+    exclusive: true
+    when:
+      label: dependencies
+  - title: 📖 Documentation
+    exclusive: true
+    when:
+      label: documentation
+  - title: 🔧 Maintenance
+    exclusive: true
+    when:
+      label: maintenance
+  - title: Other changes
+  - type: version-resolver
+    semver-increment: patch
+
+change-template: "- $TITLE (#$NUMBER)"
+change-title-escapes: '\<*_&'
+replacers:
+  # Drop the "[Feature] " style prefix; the section heading already says it.
+  - search: '/^- \[[^\]]+\] */gm'
+    replace: "- "
+
+template: |
+  $CHANGES
+
+  ## Install
+
+  Download `keycloak-email-domain-policy-$RESOLVED_VERSION.jar` below into
+  `/opt/keycloak/providers/`. Its build provenance is listed under
+  [attestations](https://github.com/$OWNER/$REPOSITORY/attestations).
+
+  **Full changelog:** https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION
+
+autolabeler:
+  - label: breaking
+    title: ['/^\[Breaking\]/i']
+  - label: feature
+    title: ['/^\[Feature\]/i']
+    branch: ['/^feature\//']
+  - label: fix
+    title: ['/^\[(Fix|Bugfix)\]/i']
+    branch: ['/^(fix|bugfix)\//']
+  - label: dependencies
+    title: ['/^\[(Dependabot|Bot)\]/i']
+  - label: documentation
+    title: ['/^\[Docs?\]/i']
+  - label: maintenance
+    title: ['/^\[(Chore|Maintenance|CI)\]/i']

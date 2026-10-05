@@ -1,0 +1,17 @@
+# Stock Keycloak image with the release JAR mounted, plus an optional list of
+# your own disposable domains that applies to every realm.
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.2.5
+    command: start-dev
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_SPI_VALIDATOR_EMAIL_DOMAIN_POLICY_DISPOSABLE_DOMAINS_FILE: /opt/keycloak/conf/email-domains/disposable.txt
+      # Check the file for changes every 5 minutes. See docs/configuration.md.
+      KC_SPI_VALIDATOR_EMAIL_DOMAIN_POLICY_DISPOSABLE_DOMAINS_RELOAD_INTERVAL: "300"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./providers/keycloak-email-domain-policy-0.1.0.jar:/opt/keycloak/providers/keycloak-email-domain-policy.jar:ro
+      - ./email-domains:/opt/keycloak/conf/email-domains:ro

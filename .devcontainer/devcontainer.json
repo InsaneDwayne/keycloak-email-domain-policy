@@ -1,0 +1,31 @@
+{
+  "name": "keycloak-email-domain-policy",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "remoteUser": "vscode",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "java.jdt.ls.java.home": "/opt/java/openjdk",
+        "java.import.gradle.enabled": false
+      },
+      "extensions": [
+        "anthropic.claude-code",
+        "vscjava.vscode-java-pack",
+        "redhat.vscode-xml",
+        "nefrob.vscode-just-syntax",
+        "GitHub.copilot",
+        "GitHub.copilot-chat"
+      ]
+    }
+  },
+  "initializeCommand": "mkdir -p \"$HOME/.ssh\" && touch \"$HOME/.gitconfig\" \"$HOME/.gitconfig-github\"",
+  "postCreateCommand": "just setup",
+  "mounts": [
+    "source=${localEnv:HOME}/.gitconfig,target=/home/vscode/.gitconfig,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.gitconfig-github,target=/home/vscode/.gitconfig-github,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.ssh,target=/home/vscode/.ssh,type=bind,readonly",
+    "source=keycloak-email-domain-policy-m2,target=/home/vscode/.m2,type=volume"
+  ]
+}

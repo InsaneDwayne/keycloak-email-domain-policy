@@ -1,0 +1,44 @@
+# Integration tests against a real Keycloak. From the repository root:
+#
+#   KEYCLOAK_VERSION=26.7.4 docker compose -f integration-tests/compose.yaml up --build --exit-code-from tests
+#   docker compose -f integration-tests/compose.yaml down --volumes
+name: email-domain-policy-it
+
+services:
+  keycloak:
+    build:
+      context: ..
+      dockerfile: integration-tests/Dockerfile
+      target: keycloak
+      args:
+        KEYCLOAK_VERSION: ${KEYCLOAK_VERSION:-latest}
+    command:
+      - start-dev
+      # Newer Keycloak versions (26.7 at least) listen only on localhost in dev mode;
+      # the tests connect from another container.
+      - --http-host=0.0.0.0
+      - --spi-validator-email-domain-policy-disposable-domains-file=/domains/disposable.txt
+      - --spi-validator-email-domain-policy-disposable-domains-reload-interval=1
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    volumes:
+      - domains:/domains
+    # Keep Keycloak's log out of the test output; see it with: docker compose logs keycloak
+    attach: false
+
+  tests:
+    build:
+      context: ..
+      dockerfile: integration-tests/Dockerfile
+      target: tests
+    environment:
+      KEYCLOAK_URL: http://keycloak:8080
+      DOMAINS_DIR: /domains
+    volumes:
+      - domains:/domains
+    depends_on:
+      - keycloak
+
+volumes:
+  domains:

@@ -1,0 +1,27 @@
+# Updates the draft release (notes and next version) after every merge to main.
+# publish-release.yml publishes it; see docs/releasing.md.
+name: Release Drafter
+
+on:
+  push:
+    branches: [main]
+  # Rebuild the draft by hand, e.g. after relabelling a merged PR.
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-drafter
+  cancel-in-progress: true
+
+jobs:
+  update-draft:
+    name: Update draft release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: release-drafter/release-drafter@v7
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

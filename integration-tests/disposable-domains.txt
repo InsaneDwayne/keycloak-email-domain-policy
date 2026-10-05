@@ -1,0 +1,3 @@
+# Server-wide disposable domains for the integration tests, read by Keycloak at
+# startup. EmailDomainPolicyIT expects this entry and appends its own on reload.
+from-startup-file.example

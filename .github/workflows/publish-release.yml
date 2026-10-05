@@ -1,0 +1,160 @@
+# Runs after every push to main. When the push brings a release commit from
+# release.yml ("Release vX.Y.Z" by the bot), it tags that commit, builds it,
+# and publishes the draft from release-drafter.yml with the JAR attached.
+# See docs/releasing.md.
+name: Publish release
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    name: Find release commit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.find.outputs.version }}
+      sha: ${{ steps.find.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: find
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          # Found after a merge commit or a rebase merge; a squash merge drops it.
+          line=$(git log --format='%H %an%x09%s' "$BEFORE..$GITHUB_SHA" \
+            | grep -E '\[bot\]'$'\t''Release v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' | head -n 1 || true)
+          if [[ -z "$line" ]]; then
+            echo "No release commit in this push."
+            exit 0
+          fi
+          sha=${line%% *}
+          version=${line##*$'\t'Release v}
+          echo "Release commit for v$version: $sha"
+          # Release.yml rebuilds the release PR on every push to main, so the
+          # release commit sits on top of main as it was before this merge.
+          # If not, a PR merged just before it would be in the notes but not
+          # in the release.
+          if ! git merge-base --is-ancestor "$BEFORE" "$sha"; then
+            echo "::error::main got changes that aren't in the release commit. Run the Release workflow again."
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  integration-tests:
+    name: Integration tests
+    needs: detect
+    if: needs.detect.outputs.version != ''
+    permissions:
+      contents: read
+    uses: ./.github/workflows/integration-tests.yml
+    with:
+      ref: ${{ needs.detect.outputs.sha }}
+
+  publish:
+    name: Publish v${{ needs.detect.outputs.version }}
+    needs: [detect, integration-tests]
+    if: needs.detect.outputs.version != ''
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.detect.outputs.version }}
+      SHA: ${{ needs.detect.outputs.sha }}
+      TAG: v${{ needs.detect.outputs.version }}
+      JAR: target/keycloak-email-domain-policy-${{ needs.detect.outputs.version }}.jar
+    steps:
+      # The App is on the bypass list of the tag ruleset; the default token
+      # can't create v* tags.
+      - id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.BOT_CLIENT_ID }}
+          private-key: ${{ secrets.BOT_PRIVATE_KEY }}
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SHA }}
+          token: ${{ steps.app-token.outputs.token }}
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Check the release commit
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          author=$(git log -1 --format=%an "$SHA")
+          if [[ "$author" != "${SLUG}[bot]" ]]; then
+            echo "::error::$SHA was committed by $author, not by the release bot."
+            exit 1
+          fi
+          pom=$(mvn -B -q -ntp help:evaluate -Dexpression=project.version -DforceStdout)
+          if [[ "$pom" != "$VERSION" ]]; then
+            echo "::error::The POM at $SHA has version $pom, not $VERSION."
+            exit 1
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --silent 2>/dev/null; then
+            echo "::error::Tag $TAG already exists."
+            exit 1
+          fi
+      - name: Build and unit tests
+        run: mvn -B -ntp verify
+      # Attestations in private repositories need GitHub Enterprise Cloud.
+      - uses: actions/attest-build-provenance@v4
+        if: ${{ !github.event.repository.private }}
+        with:
+          subject-path: ${{ env.JAR }}
+      # Kept in case publishing fails after the tag is pushed; see docs/releasing.md.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: jar
+          path: ${{ env.JAR }}
+          if-no-files-found: error
+      - name: Tag the release commit
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          id=$(gh api "/users/${SLUG}[bot]" --jq .id)
+          git config user.name "${SLUG}[bot]"
+          git config user.email "${id}+${SLUG}[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG" "$SHA"
+          git push origin "$TAG"
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEYCLOAK_VERSIONS: ${{ needs.integration-tests.outputs.versions }}
+        run: |
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq '[.[] | select(.draft)][0].id // ""')
+          if [[ -z "$id" ]]; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
+              --title "$TAG" --generate-notes
+            id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq "[.[] | select(.draft and .tag_name == \"$TAG\")][0].id")
+          fi
+          prerelease=false
+          [[ "$VERSION" == *-* ]] && prerelease=true
+          body=$(gh api "repos/$GITHUB_REPOSITORY/releases/$id" --jq .body)
+          tested="**Tested with Keycloak:** $(jq -r 'join(", ")' <<< "$KEYCLOAK_VERSIONS")"
+          [[ "$body" == *"**Tested with Keycloak:**"* ]] || body=$(printf '%s\n\n%s\n' "$body" "$tested")
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$id" \
+            -f tag_name="$TAG" -f name="$TAG" -F prerelease="$prerelease" -F draft=false \
+            -f body="$body" --silent
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" "$JAR" --clobber
+      - name: Delete the release branch
+        run: git push origin --delete "bot/release-$TAG" || true

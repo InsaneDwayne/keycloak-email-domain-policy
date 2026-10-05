@@ -1,0 +1,20 @@
+# See https://pre-commit.com for more information.
+# Hook versions are kept up to date by Dependabot (pre-commit ecosystem) or `just update-hooks`.
+default_install_hook_types: [pre-commit]
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-yaml
+      - id: check-json
+        # devcontainer.json is JSONC (allows comments)
+        exclude: ^\.devcontainer/devcontainer\.json$
+      - id: check-xml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: check-case-conflict
+      - id: detect-private-key

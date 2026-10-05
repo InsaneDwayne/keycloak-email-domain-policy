@@ -1,0 +1,83 @@
+name: Integration tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Nightly: the newest Keycloak release and Keycloak's nightly build, so a
+  # Keycloak change that breaks the extension shows up within a day, often
+  # before it's released.
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+  # publish-release.yml runs the tests on the release commit before tagging.
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: true
+    outputs:
+      versions:
+        description: JSON array of the Keycloak versions tested
+        value: ${{ jobs.versions.outputs.versions }}
+
+permissions:
+  contents: read
+
+concurrency:
+  # github.workflow is the caller's name when called, so a release run doesn't
+  # wait for the push run of the same commit.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Cancel superseded PR runs, but let every run on main finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  versions:
+    name: Keycloak versions
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.list.outputs.versions }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      - id: list
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          versions=$(scripts/keycloak-versions.sh)
+          if [[ "$GITHUB_EVENT_NAME" == schedule ]]; then
+            versions=$(printf '%s\nnightly\n' "$(tail -n 1 <<< "$versions")")
+          fi
+          echo "$versions"
+          echo "versions=$(jq -Rsc 'split("\n") | map(select(. != ""))' <<< "$versions")" >> "$GITHUB_OUTPUT"
+
+  integration-tests:
+    name: Keycloak ${{ matrix.keycloak }}
+    needs: versions
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        keycloak: ${{ fromJSON(needs.versions.outputs.versions) }}
+    env:
+      KEYCLOAK_VERSION: ${{ matrix.keycloak }}
+      COMPOSE_FILE: integration-tests/compose.yaml
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      - run: docker compose up --build --exit-code-from tests
+      - name: Keycloak log
+        if: failure()
+        run: docker compose logs keycloak
+
+  integration-tests-result:
+    # This job name is a required status check in the ruleset for main; rename it there too.
+    # One stable name, independent of the matrix entries.
+    name: Integration tests
+    needs: integration-tests
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.integration-tests.result }}" = success

@@ -1,0 +1,55 @@
+# Labels PRs from their title or branch, then requires a release label on
+# every PR, so each merged change lands in a section of the release notes.
+#
+# pull_request_target runs with the base branch's code and a write token, so
+# it also works for PRs from forks. Never check out or run the PR's code here.
+name: PR labels
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, edited, labeled, unlabeled]
+
+permissions: {}
+
+concurrency:
+  group: pr-labels-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  autolabel:
+    name: Autolabel
+    if: contains(fromJSON('["opened", "reopened", "synchronize"]'), github.event.action)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: release-drafter/release-drafter/autolabeler@v7
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  check:
+    name: Release label
+    needs: autolabel
+    # Also run when autolabel was skipped (label events) or failed.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Require a release label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Read the labels fresh: autolabel may have just added one.
+          labels=$(gh api "repos/$REPO/pulls/$PR" --jq '.labels[].name')
+          for label in breaking feature fix dependencies documentation maintenance skip-changelog; do
+            if grep -qx "$label" <<< "$labels"; then
+              echo "Release label: $label"
+              exit 0
+            fi
+          done
+          echo "::error::Add one label: breaking, feature, fix, dependencies, documentation, maintenance or skip-changelog."
+          exit 1

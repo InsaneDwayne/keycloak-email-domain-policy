@@ -1,0 +1,36 @@
+version: 2
+updates:
+  - package-ecosystem: docker
+    directory: /.devcontainer
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "[Dependabot]"
+    labels: [dependencies]
+
+  - package-ecosystem: pre-commit
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "[Dependabot]"
+    labels: [dependencies]
+
+  - package-ecosystem: maven
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "[Dependabot]"
+    labels: [dependencies]
+    # keycloak.version is the lowest supported version; raise it deliberately.
+    ignore:
+      - dependency-name: "org.keycloak:*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "[Dependabot]"
+    labels: [dependencies]
