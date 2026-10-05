@@ -86,7 +86,7 @@
         <artifactId>maven-jar-plugin</artifactId>
         <version>3.5.1</version>
       </plugin>
-      <!-- The release workflow sets the release and the next -SNAPSHOT version with
+      <!-- The release PRs set the release and the next -SNAPSHOT version with
            mvn versions:set; don't change <version> above by hand. -->
       <plugin>
         <groupId>org.codehaus.mojo</groupId>
