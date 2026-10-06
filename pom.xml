@@ -6,7 +6,7 @@
 
   <groupId>io.github.insanedwayne</groupId>
   <artifactId>keycloak-email-domain-policy</artifactId>
-  <version>0.1.0</version>
+  <version>0.2.0-SNAPSHOT</version>
   <packaging>jar</packaging>
   <name>keycloak-email-domain-policy</name>
   <description>Keycloak user profile validator that decides which email domains may be used: blocks disposable providers, plus per-realm allowed and blocked domains.</description>
