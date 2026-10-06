@@ -17,6 +17,13 @@ concurrency:
 jobs:
   update-draft:
     name: Update draft release
+    # Not on the squash-merged release PR ("[Release] vX.Y.Z (#N)", or
+    # "Release vX.Y.Z (#N)" from its commit): that would regenerate the draft
+    # and drop the edits made to it before releasing.
+    if: >-
+      github.event_name != 'push' || !(
+        startsWith(github.event.head_commit.message, '[Release] v') ||
+        startsWith(github.event.head_commit.message, 'Release v'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
