@@ -47,13 +47,13 @@ jobs:
           fi
           version=${branch#bot/release-v}
           echo "Release commit for v$version: $GITHUB_SHA"
-          # After 1.2.3 comes 1.2.4-SNAPSHOT; after 1.2.3-rc.1 comes 1.2.3-SNAPSHOT.
+          # After 1.2.3 comes 1.3.0-SNAPSHOT; after 1.3.0-rc.1 comes 1.3.0-SNAPSHOT.
           # The version actually released next is decided by the PR labels.
           if [[ "$version" == *-* ]]; then
             next="${version%%-*}-SNAPSHOT"
           else
-            IFS=. read -r major minor patch <<< "$version"
-            next="$major.$minor.$((patch + 1))-SNAPSHOT"
+            IFS=. read -r major minor _ <<< "$version"
+            next="$major.$((minor + 1)).0-SNAPSHOT"
           fi
           # A PR merged while the release PR was open can raise the draft's
           # version, e.g. a feature after a patch release was started. Shown

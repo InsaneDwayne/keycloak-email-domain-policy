@@ -22,14 +22,15 @@ flowchart TD
     relmerge --> approve[Maintainer approves<br/>the release environment]
     approve --> build[Integration and unit tests<br/>at the release commit]
     build --> publish[Tag vX.Y.Z, publish the draft,<br/>attach JAR, checksum and provenance]
-    publish --> next[Bot opens PR for X.Y.Z+1-SNAPSHOT,<br/>which merges itself]
+    publish --> next[Bot opens PR for X.Y+1.0-SNAPSHOT,<br/>which merges itself]
 ```
 
 ## Versions
 
 - The version in `pom.xml` on `main` is a `-SNAPSHOT`, except between merging
   a release PR and the next-version PR merging itself. Don't change it by
-  hand; the release PRs do.
+  hand; the release PRs do. After X.Y.Z it is X.Y+1.0-SNAPSHOT, after a
+  pre-release such as X.Y.Z-rc.1 it is X.Y.Z-SNAPSHOT.
 - The tagged commit has the released version in `pom.xml`, so building a
   tag gives the released JAR.
 - The version that is actually released comes from the labels of the merged
