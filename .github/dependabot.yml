@@ -23,9 +23,14 @@ updates:
     commit-message:
       prefix: "[Dependabot]"
     labels: [dependencies]
-    # keycloak.version is the lowest supported version; raise it deliberately.
+
+    # Allow security updates, but do not automatically raise its version for routine version updates.
     ignore:
       - dependency-name: "org.keycloak:*"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
 
   - package-ecosystem: github-actions
     directory: /
