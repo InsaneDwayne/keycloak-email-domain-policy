@@ -1,6 +1,6 @@
 # Base image is kept up to date by Dependabot (docker ecosystem).
 # Java 21 matches the runtime of the official Keycloak images.
-FROM eclipse-temurin:24-jdk-noble
+FROM eclipse-temurin:25-jdk-noble
 
 # Install Maven, git, SSH client, pre-commit and just
 RUN apt-get update && \
